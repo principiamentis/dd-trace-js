@@ -170,8 +170,8 @@ function wrapExecute (execute) {
 
       return startExecuteCh.runStores(ctx, () => {
         if (schema) {
-          wrapFields(schema._queryType)
-          wrapFields(schema._mutationType)
+          wrapFields(schema.getQueryType())
+          wrapFields(schema.getMutationType())
         }
 
         contexts.set(contextValue, ctx)
@@ -293,9 +293,7 @@ function wrapFields (type) {
 
   patchedTypes.add(type)
 
-  for (const key of Object.keys(type._fields)) {
-    const field = type._fields[key]
-
+  for (const field of Object.values(type.getFields())) {
     wrapFieldResolve(field)
     wrapFieldType(field)
   }
@@ -311,6 +309,7 @@ function wrapFieldType (field) {
 
   let unwrappedType = field.type
 
+  // see graphql.getNamedType()
   while (unwrappedType.ofType) {
     unwrappedType = unwrappedType.ofType
   }
