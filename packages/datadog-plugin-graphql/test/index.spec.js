@@ -430,7 +430,7 @@ describe('Plugin', () => {
               assert.strictEqual(spans.length, 2)
               assert.strictEqual(spans[1].service, 'test')
               assert.strictEqual(spans[1].name, 'graphql.resolve')
-              assert.strictEqual(spans[1].resource, 'hello:String')
+              assert.strictEqual(spans[1].resource, 'RootQueryType.hello')
               assert.strictEqual(spans[1].type, 'graphql')
               assert.strictEqual(spans[1].error, 0)
               assert.ok(Number(spans[1].duration) > 0)
@@ -473,13 +473,13 @@ describe('Plugin', () => {
                     continue
                   }
 
-                  if (span.resource === 'fastAsyncField:String') {
+                  if (span.resource === 'Human.fastAsyncField') {
                     assert.ok(fastAsyncTime < slowAsyncTime)
                     foundFastFieldSpan = true
-                  } else if (span.resource === 'slowAsyncField:String') {
+                  } else if (span.resource === 'Human.slowAsyncField') {
                     assert.ok(slowAsyncTime < syncTime)
                     foundSlowFieldSpan = true
-                  } else if (span.resource === 'syncField:String') {
+                  } else if (span.resource === 'Human.syncField') {
                     assert.ok(syncTime > slowAsyncTime)
                     foundSyncFieldSpan = true
                   }
@@ -542,31 +542,31 @@ describe('Plugin', () => {
               assert.strictEqual(execute.error, 0)
 
               assert.strictEqual(human.name, 'graphql.resolve')
-              assert.strictEqual(human.resource, 'human:Human')
+              assert.strictEqual(human.resource, 'RootQueryType.human')
               assert.strictEqual(human.error, 0)
               assert.strictEqual(human.meta['graphql.field.path'], 'human')
               assert.strictEqual(human.parent_id.toString(), execute.span_id.toString())
 
               assert.strictEqual(humanName.name, 'graphql.resolve')
-              assert.strictEqual(humanName.resource, 'name:String')
+              assert.strictEqual(humanName.resource, 'Human.name')
               assert.strictEqual(humanName.error, 0)
               assert.strictEqual(humanName.meta['graphql.field.path'], 'human.name')
               assert.strictEqual(humanName.parent_id.toString(), human.span_id.toString())
 
               assert.strictEqual(address.name, 'graphql.resolve')
-              assert.strictEqual(address.resource, 'address:Address')
+              assert.strictEqual(address.resource, 'Human.address')
               assert.strictEqual(address.error, 0)
               assert.strictEqual(address.meta['graphql.field.path'], 'human.address')
               assert.strictEqual(address.parent_id.toString(), human.span_id.toString())
 
               assert.strictEqual(addressCivicNumber.name, 'graphql.resolve')
-              assert.strictEqual(addressCivicNumber.resource, 'civicNumber:String')
+              assert.strictEqual(addressCivicNumber.resource, 'Address.civicNumber')
               assert.strictEqual(addressCivicNumber.error, 0)
               assert.strictEqual(addressCivicNumber.meta['graphql.field.path'], 'human.address.civicNumber')
               assert.strictEqual(addressCivicNumber.parent_id.toString(), address.span_id.toString())
 
               assert.strictEqual(addressStreet.name, 'graphql.resolve')
-              assert.strictEqual(addressStreet.resource, 'street:String')
+              assert.strictEqual(addressStreet.resource, 'Address.street')
               assert.strictEqual(addressStreet.error, 0)
               assert.strictEqual(addressStreet.meta['graphql.field.path'], 'human.address.street')
               assert.strictEqual(addressStreet.parent_id.toString(), address.span_id.toString())
@@ -602,22 +602,24 @@ describe('Plugin', () => {
               assert.strictEqual(execute.name, expectedSchema.server.opName)
 
               assert.strictEqual(friends.name, 'graphql.resolve')
-              assert.strictEqual(friends.resource, 'friends:[Human]')
+              assert.strictEqual(friends.resource, 'RootQueryType.friends')
               assert.strictEqual(friends.meta['graphql.field.path'], 'friends')
+              assert.strictEqual(friends.meta['graphql.field.type'], '[Human]')
               assert.strictEqual(friends.parent_id.toString(), execute.span_id.toString())
 
               assert.strictEqual(friendsName.name, 'graphql.resolve')
-              assert.strictEqual(friendsName.resource, 'name:String')
+              assert.strictEqual(friendsName.resource, 'Human.name')
               assert.strictEqual(friendsName.meta['graphql.field.path'], 'friends.*.name')
               assert.strictEqual(friendsName.parent_id.toString(), friends.span_id.toString())
 
               assert.strictEqual(pets.name, 'graphql.resolve')
-              assert.strictEqual(pets.resource, 'pets:[Pet!]')
+              assert.strictEqual(pets.resource, 'Human.pets')
               assert.strictEqual(pets.meta['graphql.field.path'], 'friends.*.pets')
+              assert.strictEqual(pets.meta['graphql.field.type'], '[Pet!]')
               assert.strictEqual(pets.parent_id.toString(), friends.span_id.toString())
 
               assert.strictEqual(petsName.name, 'graphql.resolve')
-              assert.strictEqual(petsName.resource, 'name:String')
+              assert.strictEqual(petsName.resource, 'Pet.name')
               assert.strictEqual(petsName.meta['graphql.field.path'], 'friends.*.pets.*.name')
               assert.strictEqual(petsName.parent_id.toString(), pets.span_id.toString())
             })
@@ -765,7 +767,7 @@ describe('Plugin', () => {
 
               assert.strictEqual(spans[4].service, 'test')
               assert.strictEqual(spans[4].name, 'graphql.resolve')
-              assert.strictEqual(spans[4].resource, 'hello:String')
+              assert.strictEqual(spans[4].resource, 'RootQueryType.hello')
             })
             .then(done)
             .catch(done)
@@ -798,6 +800,47 @@ describe('Plugin', () => {
           }
 
           graphql.graphql({ schema, source, rootValue }).catch(done)
+        })
+
+        it('should run resolver code in the respective (shared) resolver scope', () => {
+          const schema = graphql.buildSchema(`
+            type Human {
+              name: String
+            }
+            type Query {
+              friends: [Human!]
+            }
+          `)
+          const source = `query {
+            friends {
+              name
+            }
+          }`
+          const rootValue = {
+            friends () {
+              const span = tracer.scope().active()
+              assert.strictEqual(span.context()._name, 'graphql.resolve')
+              assert.strictEqual(span.context()._tags['resource.name'], 'Query.friends')
+
+              return ['alice', 'bob'].map(name => ({
+                name () {
+                  const span = tracer.scope().active()
+                  assert.strictEqual(span.context()._name, 'graphql.resolve')
+                  assert.strictEqual(span.context()._tags['resource.name'], 'Human.name')
+                  assert.strictEqual(span.context()._tags['graphql.field.path'], 'friends.*.name')
+                  return name
+                },
+              }))
+            },
+          }
+          return graphql.graphql({ schema, rootValue, source }).then(result => {
+            assert.ifError(result.errors)
+            assert.deepStrictEqual(result.data.friends, [
+              { __proto__: null, name: 'alice' },
+              { __proto__: null, name: 'bob' },
+            ])
+            assert.strictEqual(tracer.scope().active(), null)
+          })
         })
 
         it('should run returned promise in the parent context', () => {
@@ -1571,6 +1614,46 @@ describe('Plugin', () => {
 
           graphql.graphql({ schema, source }).catch(done)
         })
+
+        it('should run resolver code in the respective scope', () => {
+          const schema = graphql.buildSchema(`
+            type Human {
+              name: String
+            }
+            type Query {
+              friends: [Human!]
+            }
+          `)
+          const source = `query {
+            friends {
+              name
+            }
+          }`
+          const rootValue = {
+            friends () {
+              const span = tracer.scope().active()
+              assert.strictEqual(span.context()._name, 'graphql.resolve')
+              assert.strictEqual(span.context()._tags['resource.name'], 'Query.friends')
+
+              return ['alice', 'bob'].map((name, i) => ({
+                name () {
+                  // this field resolver is not instrumented because (in the given query) it has a depth >= 2
+                  const span = tracer.scope().active()
+                  assert.strictEqual(span.context()._name, 'graphql.execute')
+                  return name
+                },
+              }))
+            },
+          }
+          return graphql.graphql({ schema, rootValue, source }).then(result => {
+            assert.ifError(result.errors)
+            assert.deepStrictEqual(result.data.friends, [
+              { __proto__: null, name: 'alice' },
+              { __proto__: null, name: 'bob' },
+            ])
+            assert.strictEqual(tracer.scope().active(), null)
+          })
+        })
       })
 
       describe('with collapsing disabled', () => {
@@ -1606,17 +1689,17 @@ describe('Plugin', () => {
               assert.strictEqual(execute.name, expectedSchema.server.opName)
 
               assert.strictEqual(friends.name, 'graphql.resolve')
-              assert.strictEqual(friends.resource, 'friends:[Human]')
+              assert.strictEqual(friends.resource, 'RootQueryType.friends')
               assert.strictEqual(friends.meta['graphql.field.path'], 'friends')
               assert.strictEqual(friends.parent_id.toString(), execute.span_id.toString())
 
               assert.strictEqual(friend0Name.name, 'graphql.resolve')
-              assert.strictEqual(friend0Name.resource, 'name:String')
+              assert.strictEqual(friend0Name.resource, 'Human.name')
               assert.strictEqual(friend0Name.meta['graphql.field.path'], 'friends.0.name')
               assert.strictEqual(friend0Name.parent_id.toString(), friends.span_id.toString())
 
               assert.strictEqual(friend1Name.name, 'graphql.resolve')
-              assert.strictEqual(friend1Name.resource, 'name:String')
+              assert.strictEqual(friend1Name.resource, 'Human.name')
               assert.strictEqual(friend1Name.meta['graphql.field.path'], 'friends.1.name')
               assert.strictEqual(friend1Name.parent_id.toString(), friends.span_id.toString())
             })
@@ -1624,6 +1707,47 @@ describe('Plugin', () => {
             .catch(done)
 
           graphql.graphql({ schema, source }).catch(done)
+        })
+
+        it('should run resolver code in the respective resolver scope', () => {
+          const schema = graphql.buildSchema(`
+            type Human {
+              name: String
+            }
+            type Query {
+              friends: [Human!]
+            }
+          `)
+          const source = `query {
+            friends {
+              name
+            }
+          }`
+          const rootValue = {
+            friends () {
+              const span = tracer.scope().active()
+              assert.strictEqual(span.context()._name, 'graphql.resolve')
+              assert.strictEqual(span.context()._tags['resource.name'], 'Query.friends')
+
+              return ['alice', 'bob'].map((name, i) => ({
+                name () {
+                  const span = tracer.scope().active()
+                  assert.strictEqual(span.context()._name, 'graphql.resolve')
+                  assert.strictEqual(span.context()._tags['resource.name'], 'Human.name')
+                  assert.strictEqual(span.context()._tags['graphql.field.path'], `friends.${i}.name`)
+                  return name
+                },
+              }))
+            },
+          }
+          return graphql.graphql({ schema, rootValue, source }).then(result => {
+            assert.ifError(result.errors)
+            assert.deepStrictEqual(result.data.friends, [
+              { __proto__: null, name: 'alice' },
+              { __proto__: null, name: 'bob' },
+            ])
+            assert.strictEqual(tracer.scope().active(), null)
+          })
         })
       })
 
@@ -1850,7 +1974,7 @@ describe('Plugin', () => {
                 assert.ok(!('graphql.source' in spans[0].meta))
 
                 assert.strictEqual(spans[1].name, 'graphql.resolve')
-                assert.strictEqual(spans[1].resource, 'hello:String')
+                assert.strictEqual(spans[1].resource, 'RootQueryType.hello')
 
                 assert.strictEqual(spans[2].name, 'graphql.validate')
                 assert.ok(!('graphql.source' in spans[2].meta))
